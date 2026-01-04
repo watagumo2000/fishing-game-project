@@ -5,7 +5,6 @@ import './App.css';
 const ANGLE_TO_MOVE = 40;     
 const ANGLE_TO_WAIT = 30;     
 const HOOK_FORCE_DIFF = 15;   
-const REACTION_TIME = 1500;   
 const HIT_RADIUS = 5;
 const FISH_AI_TICK_MS = 1000; 
 
@@ -27,8 +26,24 @@ const JOY_SPEED = 40000;
 const RESPAWN_MIN_MS = 2000;
 const RESPAWN_MAX_MS = 5000;
 
+// TOO FARで放置されたとき消えるまでの時間 (10秒)
+const DESPAWN_MS = 10000; 
+
+// 焦らし時間
 const NIBBLE_MIN_MS = 1000;
-const NIBBLE_MAX_MS = 5000;
+const NIBBLE_MAX_MS = 7000;
+
+// 魚のタイプ定義
+type FishType = 'NORMAL' | 'RARE' | 'TRASH' | 'FRY' | 'MASTER' | 'PHANTOM';
+
+interface FishStats {
+  type: FishType;
+  size: number;        
+  baseSize: number;    
+  baseScore: number;   
+  hue: number;         
+  baseReaction: number;
+}
 
 // 角度補間関数
 const smoothAngle = (current: number, target: number, smoothing: number) => {
@@ -75,6 +90,8 @@ function App() {
   const [score, setScore] = useState(0);
   const [message, setMessage] = useState("ROD UP TO MOVE");
   
+  const [combo, setCombo] = useState(0);
+
   const [notification, setNotification] = useState<Notification>(null);
   const [debugDist, setDebugDist] = useState(999);
 
@@ -88,13 +105,19 @@ function App() {
   const fishTargetPosRef = useRef(initialPos); 
   const fishAngleRef = useRef(Math.random() * 360);
 
+  const fishStatsRef = useRef<FishStats>({ 
+    type: 'NORMAL', size: 1.0, baseSize: 1.0, baseScore: 100, hue: 0, baseReaction: 1000 
+  });
+  
+  const spawnTimeRef = useRef(0);
+  const lastNoticeTimeRef = useRef(0);
+
   const biteTimeRef = useRef(0);
   const pitchAtBiteRef = useRef(0);
   const lastFishAiTimeRef = useRef(0);
   const nibbleSeedRef = useRef(Math.random() * 100);
   const isAttackingRef = useRef(false);
 
-  // 状態フラグ
   const isRecoilingRef = useRef(false);   
   const angleLockRef = useRef<number | null>(null); 
   const isHookedRef = useRef(false);
@@ -147,6 +170,41 @@ function App() {
     }
   };
 
+  const generateFish = (): FishStats => {
+    const rand = Math.random(); 
+
+    if (rand < 0.02) {
+      const baseSize = 5.0;
+      const size = 4.5 + Math.random() * 1.0; 
+      return { type: 'MASTER', size, baseSize, baseScore: 1000, hue: 0, baseReaction: 500 };
+    } 
+    else if (rand < 0.05) {
+      const baseSize = 0.5;
+      const size = 0.4 + Math.random() * 0.2;
+      return { type: 'PHANTOM', size, baseSize, baseScore: 500, hue: 180, baseReaction: 600 };
+    }
+    else if (rand < 0.15) {
+      const baseSize = 1.2;
+      const size = 0.8 + Math.random() * 0.8;
+      return { type: 'RARE', size, baseSize, baseScore: 300, hue: 45, baseReaction: 800 };
+    }
+    else if (rand < 0.30) {
+      const baseSize = 1.0;
+      const size = 0.8 + Math.random() * 0.7;
+      return { type: 'TRASH', size, baseSize, baseScore: -50, hue: 120, baseReaction: 1500 };
+    }
+    else if (rand < 0.50) {
+      const baseSize = 0.4;
+      const size = 0.3 + Math.random() * 0.2;
+      return { type: 'FRY', size, baseSize, baseScore: 10, hue: 300, baseReaction: 2000 };
+    }
+    else {
+      const baseSize = 1.0;
+      const size = 0.8 + Math.random() * 1.2; 
+      return { type: 'NORMAL', size, baseSize, baseScore: 100, hue: 240, baseReaction: 1000 };
+    }
+  };
+
   const scheduleRespawn = () => {
     if (respawnTimerRef.current) clearTimeout(respawnTimerRef.current);
     const waitTime = RESPAWN_MIN_MS + Math.random() * (RESPAWN_MAX_MS - RESPAWN_MIN_MS);
@@ -157,8 +215,12 @@ function App() {
        fishAngleRef.current = Math.random() * 360; 
        isFishActiveRef.current = true;
        
+       fishStatsRef.current = generateFish();
+       spawnTimeRef.current = performance.now();
+       lastNoticeTimeRef.current = performance.now();
+
        isFleeingRef.current = false;
-       nibbleStartTimeRef.current = 0;
+       nibbleStartTimeRef.current = 0; 
        isAttackingRef.current = false;
        isRecoilingRef.current = false;
        angleLockRef.current = null;
@@ -193,12 +255,45 @@ function App() {
       
       if (Math.random() < 0.1) setDebugDist(distance);
 
-      const handleResult = (result: 'win' | 'lose' | 'early' | 'spook') => {
+      const handleResult = (result: 'win' | 'lose' | 'early' | 'spook' | 'vanish') => {
         if (isFleeingRef.current) return;
 
+        const stats = fishStatsRef.current;
+        let potentialScore = Math.round(stats.baseScore * stats.size);
+
         if (result === 'win') {
-          setScore(s => s + 100);
-          setNotification({ text: "GET!! +100", color: "gold", id: now });
+          // ★勝利処理
+          if (stats.type === 'TRASH') {
+              // 雑魚を釣ってしまった -> コンボリセット & 減点
+              setCombo(0);
+              setScore(s => s + potentialScore); 
+              setNotification({ text: `BAD!! ${potentialScore}`, color: "gray", id: now });
+          } else {
+              // 成功 -> コンボ加算
+              setCombo(prev => prev + 1);
+              
+              // コンボボーナス計算
+              const bonusMultiplier = 1.0 + (combo * 0.1);
+              const finalScore = Math.round(potentialScore * bonusMultiplier);
+              
+              setScore(s => s + finalScore);
+              
+              // 表示用ラベル決定
+              let label = "GET!!";
+              let color = "gold";
+
+              if (stats.type === 'RARE') { label = "RARE!!"; color = "orange"; }
+              else if (stats.type === 'PHANTOM') { label = "PHANTOM!!"; color = "cyan"; }
+              else if (stats.type === 'MASTER') { label = "MASTER!!!"; color = "red"; }
+              else if (stats.type === 'FRY') { label = "Tiny..."; color = "pink"; }
+
+              // テキスト組み立て
+              let resultText = `${label} +${finalScore}`;
+              if (combo > 0) resultText += ` (Combo x${bonusMultiplier.toFixed(1)})`;
+
+              setNotification({ text: resultText, color: color, id: now });
+          }
+
           setTimeout(() => {
             isFishActiveRef.current = false;
             setIsFishVisible(false);
@@ -207,21 +302,44 @@ function App() {
             scheduleRespawn();
           }, 0);
 
+        } else if (result === 'vanish') {
+            // 自然消滅 (コンボは維持)
+            setNotification({ text: "Fish left...", color: "gray", id: now });
+            setIsFishVisible(false);
+            isFishActiveRef.current = false;
+            setGameState('AIMING');
+            scheduleRespawn();
         } else {
+          // 失敗（逃走） -> コンボリセット
+          setCombo(0);
+          
           isFleeingRef.current = true;
-          isHookedRef.current = false; // 針固定解除
+          isHookedRef.current = false; 
           angleLockRef.current = null;
+
+          let scoreChange = 0;
+          if (stats.type === 'FRY') {
+              scoreChange = 0; 
+          } else if (stats.type === 'TRASH') {
+              scoreChange = potentialScore * 2; 
+          } else {
+              scoreChange = -Math.round(potentialScore * 0.5); 
+          }
+          
+          setScore(s => s + scoreChange);
 
           let text = "";
           let color = "";
-          if (result === 'spook') { text = "SPLASH! (Escaping!)"; color = "red"; }
-          else if (result === 'early') { text = "TOO EARLY!"; color = "orange"; }
-          else { text = "MISS..."; color = "cyan"; }
+          const diffDisplay = (scoreChange > 0) ? `+${scoreChange}` : (scoreChange === 0 ? "±0" : `${scoreChange}`);
+
+          if (result === 'spook') { text = `SPLASH! ${diffDisplay}`; color = "red"; }
+          else if (result === 'early') { text = `TOO EARLY! ${diffDisplay}`; color = "orange"; }
+          else { text = `MISS... ${diffDisplay}`; color = "cyan"; }
+
+          if (stats.type === 'FRY') color = "white";
+          if (stats.type === 'TRASH') color = "purple";
 
           setNotification({ text, color, id: now });
-          
-          // ★修正: 逃げ始めると同時にフェードアウト開始（表示をOFFに切り替え）
-          // isFishActiveRefはtrueのままなので、ループ内で位置更新は続く＝「薄くなりながら動く」
           setIsFishVisible(false); 
 
           let fleeDx = fishPosRef.current.x - hookPosRef.current.x;
@@ -252,30 +370,43 @@ function App() {
 
       // --- ゲームロジック ---
       if (gameState === 'AIMING') {
+        if (isFishActiveRef.current && !isFleeingRef.current) {
+            if (distance < FISH_NOTICE_DIST) {
+                lastNoticeTimeRef.current = now; 
+            } else {
+                if (now - lastNoticeTimeRef.current > DESPAWN_MS) {
+                    handleResult('vanish'); 
+                }
+            }
+        }
+
         if (sensor.pitch >= ANGLE_TO_WAIT) {
-           setMessage(isFishActiveRef.current ? "AIMING MODE" : "SEARCHING...");
+           if (isFishActiveRef.current && distance < FISH_NOTICE_DIST) {
+               setMessage("AIMING MODE");
+           } else if (isFishActiveRef.current) {
+               setMessage("TOO FAR... (Target < 20)");
+           } else {
+               setMessage("SEARCHING...");
+           }
+
            if (Math.abs(sensor.joyX - 32768) > JOY_DEAD_ZONE) hookPosRef.current.x -= (sensor.joyX - 32768) / JOY_SPEED; 
            if (Math.abs(sensor.joyY - 32768) > JOY_DEAD_ZONE) hookPosRef.current.y += (sensor.joyY - 32768) / JOY_SPEED;
            hookPosRef.current.x = Math.max(0, Math.min(100, hookPosRef.current.x));
            hookPosRef.current.y = Math.max(0, Math.min(100, hookPosRef.current.y));
         } else {
-           if (isFishActiveRef.current) {
-             if (!isFleeingRef.current) {
-                if (distance < SPOOK_RADIUS) {
-                  handleResult('spook');
-                } 
-                else if (distance < FISH_NOTICE_DIST) {
-                  setGameState('SINKING');
-                  setMessage("🐟 WAITING... 🐟");
-                  
-                  nibbleStartTimeRef.current = 0;
-                  isAttackingRef.current = false;
-                  isRecoilingRef.current = false;
-                  angleLockRef.current = null;
-                  isHookedRef.current = false;
-                } else {
-                  setMessage("TOO FAR... (Target < 20)");
-                }
+           if (isFishActiveRef.current && !isFleeingRef.current) {
+             if (distance < SPOOK_RADIUS) {
+               handleResult('spook');
+             } else if (distance < FISH_NOTICE_DIST) {
+                setGameState('SINKING');
+                setMessage("🐟 WAITING... 🐟");
+                nibbleStartTimeRef.current = 0;
+                isAttackingRef.current = false;
+                isRecoilingRef.current = false;
+                angleLockRef.current = null;
+                isHookedRef.current = false;
+             } else {
+                setMessage("TOO FAR... (Target < 20)");
              }
            } else {
              setMessage("...");
@@ -309,7 +440,8 @@ function App() {
                     isAttackingRef.current = true;
                 }
             }
-        } else if (distance >= NIBBLE_RADIUS) {
+        } 
+        else if (distance >= NIBBLE_RADIUS + 5.0) {
             nibbleStartTimeRef.current = 0;
         }
 
@@ -324,11 +456,15 @@ function App() {
       }
       else if (gameState === 'BITE') {
         const timeDiff = now - biteTimeRef.current;
-        if (timeDiff > REACTION_TIME) handleResult('lose');
+        const stats = fishStatsRef.current;
+        const ratio = stats.size / stats.baseSize;
+        const requiredTime = stats.baseReaction * (1.0 / ratio);
+
+        if (timeDiff > requiredTime) handleResult('lose');
         else if (sensor.pitch - pitchAtBiteRef.current > HOOK_FORCE_DIFF) handleResult('win');
       }
 
-      // --- 魚のAI (接近と逃走) ---
+      // --- 魚のAI ---
       if (!isFleeingRef.current && isFishActiveRef.current && now - lastFishAiTimeRef.current > FISH_AI_TICK_MS) {
         lastFishAiTimeRef.current = now;
         const isUfoMode = sensor.pitch >= ANGLE_TO_WAIT;
@@ -349,7 +485,7 @@ function App() {
         fishTargetPosRef.current.y = Math.max(5, Math.min(95, fishTargetPosRef.current.y));
       }
 
-      // --- アニメーション & 移動処理 ---
+      // --- アニメーション ---
       let targetAngle = fishAngleRef.current;
       let turnSpeed = FISH_TURN_SPEED;
       let moveSpeed = FISH_MOVE_SPEED;
@@ -372,7 +508,6 @@ function App() {
             const tdy = hookTipY - fishPosRef.current.y;
             const distToTip = Math.sqrt(tdx*tdx + tdy*tdy);
 
-            // ★重要: 距離が近すぎる(1.0以下)ときは角度更新をスキップして暴走回避
             if (distToTip > 1.0) {
                 targetAngle = Math.atan2(tdy, tdx) * (180 / Math.PI);
                 moveSpeed = FISH_DASH_SPEED * 1.5; 
@@ -473,7 +608,6 @@ function App() {
       }
 
       // 移動・回転
-      // 逃走中は isHooked を無視して動く
       const canMove = !isHookedRef.current || isFleeingRef.current;
 
       if (canMove) {
@@ -504,7 +638,16 @@ function App() {
         fishDivRef.current.style.top = `${fishPosRef.current.y}%`;
         
         const finalAngle = fishAngleRef.current - 180 + additionalRotate;
-        fishDivRef.current.style.transform = `translate(0%, -50%) rotate(${finalAngle}deg) scale(${currentScale})`;
+        const finalScale = fishStatsRef.current.size * currentScale;
+        const hue = fishStatsRef.current.hue;
+
+        fishDivRef.current.style.transform = `translate(0%, -50%) rotate(${finalAngle}deg) scale(${finalScale})`;
+        
+        if (fishStatsRef.current.type === 'MASTER') {
+            fishDivRef.current.style.filter = `hue-rotate(${hue}deg) brightness(0.6) saturate(1.5)`;
+        } else {
+            fishDivRef.current.style.filter = `hue-rotate(${hue}deg)`;
+        }
       }
 
       frameId = requestAnimationFrame(loop);
@@ -540,8 +683,10 @@ function App() {
             Angle: {sensorRef.current.pitch.toFixed(0)}°
           </div>
 
+          {/* コンボ表示 */}
           <div className="hud">
             <div>SCORE: {score}</div>
+            {combo > 0 && <div style={{ color: 'gold', fontSize: '20px' }}>COMBO: {combo}</div>}
             <div className={`message ${gameState === 'BITE' ? 'bite-text' : ''}`}>{message}</div>
           </div>
 
