@@ -1,42 +1,200 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+body {
+  margin: 0;
+  background-color: #203a43;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  overflow: hidden;
+  color: white;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.game-container {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  background: radial-gradient(circle, #2c5364 0%, #203a43 100%); /* 深い池の色 */
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+.hud {
+  position: absolute;
+  top: 0;
+  width: 100%;
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 24px;
+  font-weight: bold;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.message {
+  color: #00ffcc;
+  text-shadow: 0 0 10px #00ffcc;
+}
+
+.bite-text {
+  color: #ff0055;
+  font-size: 40px;
+  animation: pulse 0.1s infinite;
+}
+
+/* 池のエリア */
+.pond {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 釣り針（ウキ）共通 */
+.hook {
+  position: absolute;
+  font-size: 40px;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.2s;
+}
+
+/* 竿を上げているとき（空中にあるイメージ） */
+.hook.floating {
+  opacity: 0.6;
+  filter: drop-shadow(0 10px 5px rgba(0,0,0,0.5)); /* 影を落として浮いてる感を出す */
+  font-size: 50px;
+}
+
+/* 竿を下ろしたとき（水に入ったイメージ） */
+.hook.sinking {
+  opacity: 1.0;
+  filter: brightness(1.2);
+}
+
+/* 食いついたときの振動 */
+.hook.shaking {
+  animation: shake 0.1s infinite;
+}
+
+/* 魚 */
+.fish {
+  position: absolute;
+  font-size: 50px;
+  /* JSで制御する transform は will-change に指定 */
+  will-change: transform, left, top;
+  
+  /* ★追加: 初期状態は透明＆ぼかし */
+  opacity: 0;
+  filter: blur(10px);
+  /* 変化を滑らかにする */
+  transition: opacity 0.8s ease-out, filter 0.8s ease-out;
+  /* 念の為、見えていないときは当たり判定をなくす */
+  pointer-events: none; 
+}
+
+/* ★追加: 魚が出現したときのスタイル */
+.fish.appear {
+  opacity: 1;
+  filter: blur(0);
+}
+/* エフェクト */
+.effect-catch {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 100px;
+  animation: pop 0.5s ease-out;
+}
+
+.effect-miss {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 80px;
+  opacity: 0.5;
+}
+
+.debug-bar {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  font-family: monospace;
+  background: rgba(0,0,0,0.5);
+  padding: 5px;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes shake {
+  0% { transform: translate(-52%, -50%); }
+  50% { transform: translate(-48%, -50%); }
+  100% { transform: translate(-52%, -50%); }
+}
+
+@keyframes pop {
+  0% { transform: translate(-50%, -50%) scale(0); }
+  80% { transform: translate(-50%, -50%) scale(1.2); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ...既存のCSSの下に追加... */
+
+.state-display {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 18px;
+  color: white;
+  z-index: 20;
+}
+
+.state-display span {
+  font-weight: bold;
+}
+
+/* 状態ごとの色分け */
+.state-display .AIMING { color: cyan; }
+.state-display .SINKING { color: yellow; }
+.state-display .BITE { color: red; animation: pulse 0.1s infinite; }
+.state-display .CATCH { color: gold; }
+
+.notification {
+  position: absolute;
+  top: 15%; /* 少し上の方に出す */
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 80px;
+  font-weight: bold;
+  text-shadow: 0 0 20px black;
+  z-index: 100;
+  pointer-events: none; /* ゲーム操作の邪魔をしない */
+  
+  /* アニメーション */
+  animation: floatUp 1.5s ease-out forwards;
+}
+
+@keyframes floatUp {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.5);
   }
-  to {
-    transform: rotate(360deg);
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -60%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -80%) scale(1);
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
-}
