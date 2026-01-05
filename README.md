@@ -74,11 +74,11 @@ Raspberry Pi Picoとブラウザを **Web Serial API** で接続して遊ぶ、�
 
 ## 実行環境
 私が開発時に使用してた実行環境を載せます。それ以外の環境は私も知らないので頑張って動かしてください！
--**OS**: Arch linux x86_64。多分ほかのOSでも行けるはず。
--**IDE**: VScode。MicroPicoの拡張を追加して書き込みしました。参考程度に…https://micropython.org/download/RPI_PICO/
--**ブラウザ**: Chronium。Serial APIが使えるブラウザならおそらくなんでも行けるはず…そもそもSerial API自体が広く普及していないので使えるブラウザは限られると思う。（Edgeは行けるみたい）参考程度に…https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
--**node.js**:v25.2.1。Viteが動かせれば。
--**Package Manager**: npm v11.6.4。お好みのものを…
+- **OS**: Arch linux x86_64。多分ほかのOSでも行けるはず。
+- **IDE**: VScode。MicroPicoの拡張を追加して書き込みしました。参考程度に…https://micropython.org/download/RPI_PICO/
+- **ブラウザ**: Chronium。Serial APIが使えるブラウザならおそらくなんでも行けるはず…そもそもSerial API自体が広く普及していないので使えるブラウザは限られると思う。（Edgeは行けるみたい）参考程度に…https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
+- **node.js**:v25.2.1。Viteが動かせれば。
+- **Package Manager**: npm v11.6.4。お好みのものを…
 
 > **Developer Note**: 
 > 途中ポーズ機能や3分間でスコアを競うモードまでこぎつけたものの原因不明の通信ができない現象により、安定してた作りかけを公開してます。
